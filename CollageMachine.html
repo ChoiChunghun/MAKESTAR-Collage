@@ -1133,8 +1133,14 @@ const BG_PRESETS = [
   {c:'#E8F5E9'},
 ];
 
-const LOGO_SVG_LIGHT = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="28" viewBox="0 0 200 28"><text x="0" y="22" font-family="Arial Black,sans-serif" font-size="20" font-weight="900" fill="white" letter-spacing="1">MAKESTAR</text></svg>`;
-const LOGO_SVG_DARK = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="28" viewBox="0 0 200 28"><text x="0" y="22" font-family="Arial Black,sans-serif" font-size="20" font-weight="900" fill="#121212" letter-spacing="1">MAKESTAR</text></svg>`;
+const LOGO_SVG_LIGHT = './Logo_WHI.svg';
+const LOGO_SVG_DARK = './Logo_BLK.svg';
+const LOGO_FIGMA_FRAME = {
+  designWidth: 1080,
+  width: 169.56150817871094,
+  height: 24,
+  inset: 40,
+};
 const LOGO_POSITIONS = [
   {id:'top-left', label:'좌상단', h:'left', v:'top'},
   {id:'top-center', label:'상단 중앙', h:'center', v:'top'},
@@ -1420,24 +1426,23 @@ function setLogoPosition(positionId) {
 }
 
 function getLogoPlacement(canvasWidth, canvasHeight) {
-  const logoWidth = canvasWidth * 0.22;
-  const logoHeight = logoWidth * 0.14;
-  const paddingX = canvasWidth * (40.44 / 1080);
-  const paddingY = canvasHeight * (40 / 1080);
+  const scale = canvasWidth / LOGO_FIGMA_FRAME.designWidth;
+  const logoWidth = LOGO_FIGMA_FRAME.width * scale;
+  const logoHeight = LOGO_FIGMA_FRAME.height * scale;
+  const inset = LOGO_FIGMA_FRAME.inset * scale;
   const selected = LOGO_POSITIONS.find(position => position.id === logoPosition) || LOGO_POSITIONS[5];
 
   const style = {
     width: logoWidth,
     height: logoHeight,
-    opacity: 0.92,
   };
 
-  if (selected.h === 'left') style.left = paddingX;
+  if (selected.h === 'left') style.left = inset;
   else if (selected.h === 'center') style.left = (canvasWidth - logoWidth) / 2;
-  else style.right = paddingX;
+  else style.right = inset;
 
-  if (selected.v === 'top') style.top = paddingY;
-  else style.bottom = paddingY;
+  if (selected.v === 'top') style.top = inset;
+  else style.bottom = inset;
 
   return style;
 }
@@ -1453,17 +1458,13 @@ function renderLogoLayer() {
   if (!canvasWidth || !canvasHeight) return;
 
   const placement = getLogoPlacement(canvasWidth, canvasHeight);
-  const svgText = logoColor === 'light' ? LOGO_SVG_LIGHT : LOGO_SVG_DARK;
-  const blob = new Blob([svgText], {type:'image/svg+xml'});
-  const url = URL.createObjectURL(blob);
   const img = document.createElement('img');
-  img.src = url;
-  img.style.cssText = `position:absolute;width:${placement.width}px;height:${placement.height}px;opacity:${placement.opacity};`
+  img.src = logoColor === 'light' ? LOGO_SVG_LIGHT : LOGO_SVG_DARK;
+  img.style.cssText = `position:absolute;width:${placement.width}px;height:${placement.height}px;`
     + (placement.left !== undefined ? `left:${placement.left}px;` : '')
     + (placement.right !== undefined ? `right:${placement.right}px;` : '')
     + (placement.top !== undefined ? `top:${placement.top}px;` : '')
     + (placement.bottom !== undefined ? `bottom:${placement.bottom}px;` : '');
-  img.onload = () => URL.revokeObjectURL(url);
   layer.appendChild(img);
 }
 
@@ -2498,20 +2499,11 @@ async function exportImage() {
   }
 
   if (logoOn) {
-    const svgText = logoColor === 'light' ? LOGO_SVG_LIGHT : LOGO_SVG_DARK;
-    const blob = new Blob([svgText], {type:'image/svg+xml'});
-    const url = URL.createObjectURL(blob);
-    try {
-      const logoImg = await loadImgAsync(url);
-      const placement = getLogoPlacement(width, height);
-      const dx = placement.left ?? (width - placement.width - placement.right);
-      const dy = placement.top ?? (height - placement.height - placement.bottom);
-      ctx.globalAlpha = 0.92;
-      ctx.drawImage(logoImg, dx, dy, placement.width, placement.height);
-      ctx.globalAlpha = 1;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    const logoImg = await loadImgAsync(logoColor === 'light' ? LOGO_SVG_LIGHT : LOGO_SVG_DARK);
+    const placement = getLogoPlacement(width, height);
+    const dx = placement.left ?? (width - placement.width - placement.right);
+    const dy = placement.top ?? (height - placement.height - placement.bottom);
+    ctx.drawImage(logoImg, dx, dy, placement.width, placement.height);
   }
 
   canvas.toBlob(blob => {
