@@ -1164,6 +1164,35 @@ let logoPosition = 'bottom-right';
 let layoutSectionOpen = true;
 let activeDrag = null;
 let toastTimer = null;
+let savedStateSnapshot = '';
+
+function createStateSnapshot() {
+  return JSON.stringify({
+    mode,
+    ratio,
+    selectedLayoutId: selectedLayout?.id || null,
+    gapPx,
+    bgColor,
+    logoOn,
+    logoColor,
+    logoPosition,
+    pickedImages: pickedImages.map(image => image.src),
+    cells: cells.map(cell => ({
+      imgSrc: cell.imgSrc || null,
+      imgX: Number(cell.imgX || 0).toFixed(2),
+      imgY: Number(cell.imgY || 0).toFixed(2),
+      imgScale: Number(cell.imgScale || 1).toFixed(4),
+    })),
+  });
+}
+
+function markCurrentStateAsSaved() {
+  savedStateSnapshot = createStateSnapshot();
+}
+
+function hasUnsavedChanges() {
+  return createStateSnapshot() !== savedStateSnapshot;
+}
 
 function openAddFiles(){
   document.getElementById('file-input').click();
@@ -1348,6 +1377,12 @@ window.addEventListener('resize', () => {
   sizeCanvas();
   rebuildCanvas();
   renderLogoLayer();
+});
+
+window.addEventListener('beforeunload', event => {
+  if (!hasUnsavedChanges()) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 
 function updateArtistOverlay() {
@@ -2406,6 +2441,7 @@ async function exportImage() {
   }
 
   showToast('이미지 생성 중…');
+  const exportedStateSnapshot = createStateSnapshot();
 
   const width = 1080;
   const height = ratio === '3:4' ? 1440 : 1080;
@@ -2507,10 +2543,15 @@ async function exportImage() {
   }
 
   canvas.toBlob(blob => {
+    if (!blob) {
+      showToast('이미지 생성에 실패했어요');
+      return;
+    }
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `collagemachine_${mode}_${ratio.replace(':', 'x')}_${Date.now()}.png`;
     link.click();
+    savedStateSnapshot = exportedStateSnapshot;
     showToast('다운로드 완료!');
   }, 'image/png');
 }
@@ -2550,6 +2591,7 @@ function resetAll() {
   renderLayoutGrid();
   setBgColor('#FFFFFF');
   buildCanvas();
+  markCurrentStateAsSaved();
   showToast('초기화했어요');
 }
 
@@ -2573,6 +2615,7 @@ function init() {
   setBgColor('#FFFFFF');
   buildCanvas();
   updateSelectedImageTools();
+  markCurrentStateAsSaved();
 }
 
 document.addEventListener('DOMContentLoaded', init);
