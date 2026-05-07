@@ -1164,6 +1164,11 @@ let layoutSectionOpen = true;
 let activeDrag = null;
 let toastTimer = null;
 let savedStateSnapshot = '';
+let hasUserInput = false;
+
+function markUserInput() {
+  hasUserInput = true;
+}
 
 function createStateSnapshot() {
   return JSON.stringify({
@@ -1187,10 +1192,11 @@ function createStateSnapshot() {
 
 function markCurrentStateAsSaved() {
   savedStateSnapshot = createStateSnapshot();
+  hasUserInput = false;
 }
 
 function hasUnsavedChanges() {
-  return createStateSnapshot() !== savedStateSnapshot;
+  return hasUserInput && createStateSnapshot() !== savedStateSnapshot;
 }
 
 function openAddFiles(){
@@ -1231,7 +1237,8 @@ function renderBgSwatches() {
   wrap.appendChild(custom);
 }
 
-function setBgColor(color) {
+function setBgColor(color, trackInput = true) {
+  if (trackInput) markUserInput();
   bgColor = color;
   renderBgSwatches();
   document.getElementById('canvas-bg').style.background = color;
@@ -1316,6 +1323,7 @@ function ensureSelectedLayout() {
 }
 
 function setMode(nextMode) {
+  markUserInput();
   mode = nextMode;
   if (!isRatioAllowed(ratio)) ratio = '1:1';
   if (mode === 'artist') ratio = '1:1';
@@ -1329,6 +1337,7 @@ function setMode(nextMode) {
 
 function setRatio(nextRatio) {
   if (!isRatioAllowed(nextRatio)) return;
+  markUserInput();
   ratio = nextRatio;
   ensureSelectedLayout();
   syncModeUi();
@@ -1450,12 +1459,14 @@ function updateArtistOverlay() {
 }
 
 function updateLogo() {
+  markUserInput();
   logoOn = document.getElementById('logo-toggle').checked;
   syncLogoUi();
   renderLogoLayer();
 }
 
 function setLogoColor(color) {
+  markUserInput();
   logoColor = color;
   document.querySelectorAll('.logo-color-btn').forEach((button, index) => {
     const target = index === 0 ? 'light' : 'dark';
@@ -1503,6 +1514,7 @@ function renderLogoPositionButtons() {
 }
 
 function setLogoPosition(positionId) {
+  markUserInput();
   logoPosition = positionId;
   renderLogoPositionButtons();
   renderLogoLayer();
@@ -1573,6 +1585,7 @@ function handleAddFiles(input) {
   }));
 
   Promise.all(readers).then(images => {
+    if (images.length) markUserInput();
     pickedImages.push(...images);
     renderImagesStrip();
     buildCanvas();
@@ -1601,6 +1614,7 @@ function renderImagesStrip() {
 }
 
 function removeImage(index) {
+  markUserInput();
   pickedImages.splice(index, 1);
   renderImagesStrip();
   buildCanvas();
@@ -1615,6 +1629,7 @@ function handleReplaceFile(input) {
 
   const reader = new FileReader();
   reader.onload = event => {
+    markUserInput();
     placeImage(selectedCellIdx, event.target.result);
     selectCell(selectedCellIdx);
   };
@@ -1682,6 +1697,7 @@ function renderLayoutGrid() {
 function selectLayout(layoutId) {
   const layout = getAvailableLayouts().find(item => item.id === layoutId);
   if (!layout) return;
+  markUserInput();
   selectedLayout = layout;
   renderLayoutGrid();
   buildCanvas();
@@ -2011,6 +2027,7 @@ function clearSelectedCellImage() {
     showToast('삭제할 이미지가 없어요');
     return;
   }
+  markUserInput();
   clearCellImage(selectedCellIdx);
 }
 
@@ -2149,6 +2166,7 @@ function clampPan(value, axis, cellIndex) {
 
 function updateSelectedImageScale(value) {
   if (selectedCellIdx < 0 || !cells[selectedCellIdx]) return;
+  markUserInput();
   const cell = cells[selectedCellIdx];
   cell.imgScale = clampScale(Number(value) / 100);
   cell.imgX = clampPan(cell.imgX, 'x', selectedCellIdx);
@@ -2162,6 +2180,7 @@ function applyScaleDelta(cellIndex, delta) {
   const cell = cells[cellIndex];
   if (!cell?.imgSrc) return;
 
+  markUserInput();
   cell.imgScale = clampScale(cell.imgScale + delta);
   cell.imgX = clampPan(cell.imgX, 'x', cellIndex);
   cell.imgY = clampPan(cell.imgY, 'y', cellIndex);
@@ -2176,6 +2195,7 @@ function updateDrag(moveX, moveY) {
   const cell = cells[cellIndex];
   if (!cell?.imgSrc) return;
 
+  if (moveX !== startX || moveY !== startY) markUserInput();
   cell.imgX = clampPan(originX + (moveX - startX), 'x', cellIndex);
   cell.imgY = clampPan(originY + (moveY - startY), 'y', cellIndex);
 
@@ -2336,6 +2356,7 @@ function updateSelectedImageTools() {
 }
 
 function updateGap(value) {
+  markUserInput();
   gapPx = parseInt(value, 10);
   document.getElementById('gap-val').textContent = gapPx + 'px';
   rebuildCanvas();
@@ -2628,6 +2649,7 @@ async function exportImage() {
     link.download = getExportFilename();
     link.click();
     savedStateSnapshot = exportedStateSnapshot;
+    hasUserInput = false;
     showToast('다운로드 완료!');
   }, 'image/png');
 }
@@ -2662,7 +2684,7 @@ function resetAll() {
   syncLayoutToggle();
   applyRatioToCanvas();
   renderLayoutGrid();
-  setBgColor('#FFFFFF');
+  setBgColor('#FFFFFF', false);
   buildCanvas();
   markCurrentStateAsSaved();
   showToast('초기화했어요');
@@ -2686,7 +2708,7 @@ function init() {
   selectedLayout = getDefaultLayout();
   applyRatioToCanvas();
   renderLayoutGrid();
-  setBgColor('#FFFFFF');
+  setBgColor('#FFFFFF', false);
   buildCanvas();
   updateSelectedImageTools();
   markCurrentStateAsSaved();
