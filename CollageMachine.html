@@ -23,6 +23,7 @@
   --radius-lg:18px;
   --radius-md:14px;
   --radius-sm:10px;
+  --canvas-cell-radius:4px;
 }
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Pretendard,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -722,6 +723,7 @@ button{border:none;cursor:pointer}
   position:absolute;
   overflow:hidden;
   background:#1c1c1c;
+  border-radius:var(--canvas-cell-radius);
   cursor:pointer;
   z-index:1;
   touch-action:none;
@@ -1666,6 +1668,8 @@ function renderLayoutGrid() {
         rect.setAttribute('y', zone.y + gap / 2);
         rect.setAttribute('width', Math.max(0, zone.w - gap));
         rect.setAttribute('height', Math.max(0, zone.h - gap));
+        rect.setAttribute('rx', '2');
+        rect.setAttribute('ry', '2');
         rect.setAttribute('fill', TC[index % TC.length]);
         svg.appendChild(rect);
       });
@@ -2482,6 +2486,48 @@ function getSvgClipPathPoints(zoneIndex) {
   return formatPoints(result);
 }
 
+function addRoundedRectPath(ctx, x, y, width, height, radius) {
+  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+
+  if (!safeRadius) {
+    ctx.rect(x, y, width, height);
+    return;
+  }
+
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+  ctx.closePath();
+}
+
+function getExportDateStamp() {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(new Date()).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}${parts.month}${parts.day}`;
+}
+
+function getExportFilename() {
+  const dateStamp = getExportDateStamp();
+  if (mode === 'thumbnail') return `mks_item_thumb_${dateStamp}.png`;
+  if (mode === 'guide') return `mks_item_msg_${dateStamp}.png`;
+  return `mks_artist_thumbnail_${dateStamp}.png`;
+}
+
 async function loadImgAsync(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -2567,10 +2613,10 @@ async function exportImage() {
     const cellY = (rect.top - containerRect.top) * scaleY;
     const cellWidth = cell.el.offsetWidth * scaleX;
     const cellHeight = cell.el.offsetHeight * scaleY;
+    const exportRadius = 4 * Math.min(scaleX, scaleY);
 
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(cellX, cellY, cellWidth, cellHeight);
+    addRoundedRectPath(ctx, cellX, cellY, cellWidth, cellHeight, exportRadius);
     ctx.clip();
 
     const naturalRatio = img.naturalWidth / img.naturalHeight;
@@ -2606,7 +2652,7 @@ async function exportImage() {
     }
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `collagemachine_${mode}_${ratio.replace(':', 'x')}_${Date.now()}.png`;
+    link.download = getExportFilename();
     link.click();
     savedStateSnapshot = exportedStateSnapshot;
     showToast('다운로드 완료!');
