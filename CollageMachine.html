@@ -63,7 +63,7 @@ button{border:none;cursor:pointer}
   display:flex;
   align-items:flex-end;
   justify-content:space-between;
-  gap:12px;
+  gap:24px;
 }
 
 .panel-title{
@@ -459,6 +459,7 @@ button{border:none;cursor:pointer}
 }
 
 .toggle-label input{accent-color:var(--accent)}
+.toggle-label input:disabled + span{opacity:.56}
 
 .logo-color-btns{
   display:grid;
@@ -987,7 +988,7 @@ button{border:none;cursor:pointer}
               <input type="checkbox" id="logo-toggle" onchange="updateLogo()">
               <span>로고 삽입</span>
             </label>
-            <span class="section-note">기본값 Off</span>
+            <span class="section-note" id="logo-default-note">로고 없음</span>
           </div>
 
           <div class="logo-color-btns" id="logo-color-btns" style="display:none">
@@ -1019,7 +1020,7 @@ button{border:none;cursor:pointer}
     <div class="workspace-head">
       <div>
         <div class="workspace-title" id="workspace-title">썸네일 미리보기</div>
-        <div class="workspace-subtitle" id="workspace-subtitle">1:1 기준으로 빠르게 콜라주를 만들고 이미지 위치를 조정할 수 있습니다.</div>
+        <div class="workspace-subtitle" id="workspace-subtitle">메이크스타 상품 등록용 썸네일 / 1:1 / 로고 없음</div>
       </div>
       <div class="workspace-meta" id="canvas-info">1080 × 1080 px</div>
     </div>
@@ -1036,7 +1037,7 @@ button{border:none;cursor:pointer}
           </div>
           <div id="logo-layer"></div>
         </div>
-        <div class="canvas-info" id="canvas-help">업로드한 이미지는 자동으로 배치되며, 셀을 선택해 교체·삭제·확대할 수 있습니다.</div>
+        <div class="canvas-info" id="canvas-help">썸네일은 1:1 고정이며 로고 없이 자동 배치됩니다. 셀을 선택한 뒤 이동, 교체, 삭제, 확대를 조정해 주세요.</div>
       </div>
     </div>
   </main>
@@ -1239,6 +1240,54 @@ function setBgColor(color) {
   document.getElementById('canvas-container').style.background = color;
 }
 
+function getLogoModePolicy() {
+  if (mode === 'thumbnail') {
+    return {
+      defaultOn:false,
+      forceOn:false,
+      forceOff:true,
+      note:'로고 없음',
+    };
+  }
+
+  if (mode === 'guide') {
+    return {
+      defaultOn:true,
+      forceOn:true,
+      forceOff:false,
+      note:'로고 필수',
+    };
+  }
+
+  return {
+    defaultOn:true,
+    forceOn:false,
+    forceOff:false,
+    note:'기본값 On',
+  };
+}
+
+function syncLogoUi() {
+  const policy = getLogoModePolicy();
+  const toggle = document.getElementById('logo-toggle');
+  const note = document.getElementById('logo-default-note');
+  const colorBtns = document.getElementById('logo-color-btns');
+  const positionWrap = document.getElementById('logo-position-wrap');
+
+  if (policy.forceOff) logoOn = false;
+  if (policy.forceOn) logoOn = true;
+
+  toggle.checked = logoOn;
+  toggle.disabled = policy.forceOn || policy.forceOff;
+  note.textContent = policy.note;
+  colorBtns.style.display = logoOn ? 'grid' : 'none';
+  positionWrap.style.display = logoOn ? '' : 'none';
+}
+
+function applyDefaultLogoForMode() {
+  logoOn = getLogoModePolicy().defaultOn;
+}
+
 function isRatioAllowed(targetRatio) {
   if (mode === 'artist') return targetRatio === '1:1';
   if (mode === 'thumbnail') return targetRatio === '1:1';
@@ -1273,6 +1322,7 @@ function setMode(nextMode) {
   if (!isRatioAllowed(ratio)) ratio = '1:1';
   if (mode === 'artist') ratio = '1:1';
   ensureSelectedLayout();
+  applyDefaultLogoForMode();
   syncModeUi();
   applyRatioToCanvas();
   renderLayoutGrid();
@@ -1314,22 +1364,23 @@ function syncModeUi() {
     ratioNote.textContent = '3:4 비율 비활성화';
     layoutNote.textContent = '1장~9장 후 기본 레이아웃';
     workspaceTitle.textContent = '썸네일 미리보기';
-    workspaceSubtitle.textContent = '썸네일 모드는 1:1 고정입니다. 자동 배치 후 선택 이미지 중심으로 디테일을 조정할 수 있습니다.';
-    canvasHelp.textContent = '썸네일 이미지는 1:1 기준으로 배치됩니다. 셀을 선택한 뒤 드래그와 확대 슬라이더로 위치와 크기를 맞춰 주세요.';
+    workspaceSubtitle.textContent = '메이크스타 상품 등록용 썸네일 / 1:1 / 로고 없음';
+    canvasHelp.textContent = '썸네일은 1:1 고정이며 로고 없이 자동 배치됩니다. 셀을 선택한 뒤 이동, 교체, 삭제, 확대를 조정해 주세요.';
   } else if (mode === 'guide') {
     ratioNote.textContent = '1:1 / 3:4 지원';
     layoutNote.textContent = '1장~9장 후 기본 레이아웃';
     workspaceTitle.textContent = '메신저 미리보기';
-    workspaceSubtitle.textContent = '메신저 모드에서는 1:1과 3:4를 모두 지원합니다. 비율에 맞는 자동 레이아웃으로 바로 조합할 수 있습니다.';
-    canvasHelp.textContent = '메신저 이미지는 비율에 맞게 자동 정렬됩니다. 필요한 셀만 선택해서 교체, 삭제, 확대해 주세요.';
+    workspaceSubtitle.textContent = '고객 안내를 위한 카카오톡, 위챗 등에서 사용할 이미지 / 1:1, 3:4 지원 / 로고 필수';
+    canvasHelp.textContent = '메신저 이미지는 1:1과 3:4를 지원하며 로고가 항상 포함됩니다. 필요한 셀만 선택해 위치와 크기를 정리해 주세요.';
   } else {
     ratioNote.textContent = '';
     layoutNote.textContent = '1:1 / 1장 고정';
     workspaceTitle.textContent = '아티스트 미리보기';
-    workspaceSubtitle.textContent = '아티스트 모드는 1:1 단일 레이아웃만 노출합니다. 가려지는 영역 가이드를 함께 확인할 수 있습니다.';
-    canvasHelp.textContent = '아티스트 모드는 1:1 단일 레이아웃입니다. 상하 가림 영역을 보면서 이미지를 맞춰 주세요.';
+    workspaceSubtitle.textContent = '메이크스타 아티스트 등록용 이미지 / 가려지는 영역에 멤버 또는 이목구비가 없어야 함';
+    canvasHelp.textContent = '가림 영역 안에 멤버나 이목구비가 들어가지 않도록 이미지를 맞춰 주세요.';
   }
 
+  syncLogoUi();
   updateArtistOverlay();
 }
 
@@ -1402,8 +1453,7 @@ function updateArtistOverlay() {
 
 function updateLogo() {
   logoOn = document.getElementById('logo-toggle').checked;
-  document.getElementById('logo-color-btns').style.display = logoOn ? 'grid' : 'none';
-  document.getElementById('logo-position-wrap').style.display = logoOn ? '' : 'none';
+  syncLogoUi();
   renderLogoLayer();
 }
 
@@ -1580,6 +1630,9 @@ function renderLayoutGrid() {
   const grid = document.getElementById('layout-grid');
   const isPortrait = ratio === '3:4' && mode !== 'artist';
   const NS = 'http://www.w3.org/2000/svg';
+  const previewInset = 20;
+  const previewStroke = 20;
+  const previewScale = (VB - previewInset * 2) / VB;
 
   grid.innerHTML = '';
   layouts.forEach(layout => {
@@ -1591,14 +1644,18 @@ function renderLayoutGrid() {
     const svg = document.createElementNS(NS, 'svg');
     if (layout.svgZones?.length) {
       svg.setAttribute('viewBox', `0 0 ${VB} ${VB}`);
+      const group = document.createElementNS(NS, 'g');
+      group.setAttribute('transform', `translate(${previewInset} ${previewInset}) scale(${previewScale})`);
       layout.svgZones.forEach((zone, index) => {
         const poly = document.createElementNS(NS, 'polygon');
         poly.setAttribute('points', zone.p);
         poly.setAttribute('fill', TC[index % TC.length]);
         poly.setAttribute('stroke', '#111111');
-        poly.setAttribute('stroke-width', '30');
-        svg.appendChild(poly);
+        poly.setAttribute('stroke-width', String(previewStroke));
+        poly.setAttribute('stroke-linejoin', 'round');
+        group.appendChild(poly);
       });
+      svg.appendChild(group);
     } else {
       svg.setAttribute('viewBox', '0 0 100 100');
       svg.setAttribute('preserveAspectRatio', 'none');
@@ -2561,7 +2618,7 @@ function resetAll() {
   selectedCellIdx = -1;
   gapPx = 0;
   bgColor = '#FFFFFF';
-  logoOn = false;
+  logoOn = getLogoModePolicy().defaultOn;
   logoColor = 'light';
   logoPosition = 'bottom-right';
   layoutSectionOpen = true;
@@ -2574,9 +2631,6 @@ function resetAll() {
   document.getElementById('file-replace').value = '';
   document.getElementById('gap-slider').value = '0';
   document.getElementById('gap-val').textContent = '0px';
-  document.getElementById('logo-toggle').checked = false;
-  document.getElementById('logo-color-btns').style.display = 'none';
-  document.getElementById('logo-position-wrap').style.display = 'none';
   document.querySelectorAll('.logo-color-btn').forEach((button, index) => {
     button.classList.toggle('active', index === 0);
   });
@@ -2604,6 +2658,7 @@ function showToast(message) {
 }
 
 function init() {
+  applyDefaultLogoForMode();
   renderImagesStrip();
   renderBgSwatches();
   renderLogoPositionButtons();
