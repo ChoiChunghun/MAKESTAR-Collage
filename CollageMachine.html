@@ -949,6 +949,12 @@ button{border:none;cursor:pointer}
             <span>3:4</span>
           </button>
         </div>
+        <div class="toggle-row" style="padding-top:10px">
+          <label class="toggle-label">
+            <input type="checkbox" id="portrait-fit-toggle" onchange="setPortraitHeightFitEnabled(this.checked)">
+            <span>세로 높이 맞춤 (잡지, 도서류)</span>
+          </label>
+        </div>
       </section>
 
       <section class="section">
@@ -1165,6 +1171,8 @@ let activeDrag = null;
 let toastTimer = null;
 let savedStateSnapshot = '';
 let hasUserInput = false;
+let portraitHeightFitEnabled = false;
+const PORTRAIT_LONG_RATIO = 0.86;
 
 function markUserInput() {
   hasUserInput = true;
@@ -1180,6 +1188,7 @@ function createStateSnapshot() {
     logoOn,
     logoColor,
     logoPosition,
+    portraitHeightFitEnabled,
     pickedImages: pickedImages.map(image => image.src),
     cells: cells.map(cell => ({
       imgSrc: cell.imgSrc || null,
@@ -1243,6 +1252,142 @@ function setBgColor(color, trackInput = true) {
   renderBgSwatches();
   document.getElementById('canvas-bg').style.background = color;
   document.getElementById('canvas-container').style.background = color;
+}
+
+function isPortraitLongRatio(ratioValue) {
+  return ratioValue > 0 && ratioValue < PORTRAIT_LONG_RATIO;
+}
+
+function shouldUsePortraitHeightFit(naturalWidth, naturalHeight, options = {}) {
+  if (!portraitHeightFitEnabled) return false;
+  if (!options.allowPortraitHeightFit) return false;
+  if (mode === 'artist') return false;
+  return isPortraitLongRatio(naturalWidth / naturalHeight);
+}
+
+function getFitMetrics(naturalWidth, naturalHeight, frameWidth, frameHeight, options = {}) {
+  const naturalRatio = naturalWidth / naturalHeight;
+  const frameRatio = frameWidth / frameHeight;
+  let baseWidth;
+  let baseHeight;
+  let fitMode = 'cover';
+
+  if (shouldUsePortraitHeightFit(naturalWidth, naturalHeight, options)) {
+    baseHeight = frameHeight;
+    baseWidth = frameHeight * naturalRatio;
+    fitMode = 'height';
+  } else if (naturalRatio >= frameRatio) {
+    baseHeight = frameHeight;
+    baseWidth = frameHeight * naturalRatio;
+  } else {
+    baseWidth = frameWidth;
+    baseHeight = frameWidth / naturalRatio;
+  }
+
+  let clipWidth = frameWidth;
+  let clipHeight = frameHeight;
+
+  return {
+    naturalRatio,
+    frameRatio,
+    fitMode,
+    baseWidth,
+    baseHeight,
+    clipWidth,
+    clipHeight,
+    frameLeft:(frameWidth - clipWidth) / 2,
+    frameTop:(frameHeight - clipHeight) / 2,
+  };
+}
+
+function updateRectCellBackground(cell, fitMetrics) {
+  if (!cell?.el) return;
+  cell.el.style.background = fitMetrics?.fitMode === 'height' ? 'transparent' : '#1c1c1c';
+}
+
+function getRectLayoutBounds() {
+  const rectCells = cells.filter(cell => cell && !cell.isSvg && cell.el);
+  if (!rectCells.length) return null;
+
+  let left = Infinity;
+  let right = -Infinity;
+  let top = Infinity;
+  let bottom = -Infinity;
+
+  rectCells.forEach(cell => {
+    const cellLeft = cell.el.offsetLeft;
+    const cellTop = cell.el.offsetTop;
+    const cellRight = cellLeft + cell.el.offsetWidth;
+    const cellBottom = cellTop + cell.el.offsetHeight;
+    left = Math.min(left, cellLeft);
+    right = Math.max(right, cellRight);
+    top = Math.min(top, cellTop);
+    bottom = Math.max(bottom, cellBottom);
+  });
+
+  if (!isFinite(left) || !isFinite(right) || !isFinite(top) || !isFinite(bottom)) return null;
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    cx:(left + right) / 2,
+    cy:(top + bottom) / 2,
+  };
+}
+
+function getRectImageOffsetX(cellIndex, fitMetrics, drawWidth) {
+  const centeredOffset = (fitMetrics.clipWidth - drawWidth) / 2;
+  if (!portraitHeightFitEnabled || fitMetrics.fitMode !== 'height' || drawWidth > fitMetrics.clipWidth + 0.5) {
+    return centeredOffset;
+  }
+
+  const cell = cells[cellIndex];
+  const layoutBounds = getRectLayoutBounds();
+  if (!cell?.el || !layoutBounds) return centeredOffset;
+
+  const cellCenterX = cell.el.offsetLeft + cell.el.offsetWidth / 2;
+  const EPS = 0.5;
+
+  if (cellCenterX < layoutBounds.cx - EPS) {
+    return fitMetrics.clipWidth - drawWidth;
+  }
+  if (cellCenterX > layoutBounds.cx + EPS) {
+    return 0;
+  }
+  return centeredOffset;
+}
+
+function applyRectFrameMask(cell, cellWidth, cellHeight, fitMetrics) {
+  if (!fitMetrics) {
+    cell.el.style.clipPath = '';
+    return;
+  }
+
+  const clipLeft = Math.max(0, fitMetrics.frameLeft);
+  const clipRight = Math.max(0, cellWidth - fitMetrics.frameLeft - fitMetrics.clipWidth);
+  const clipTop = Math.max(0, fitMetrics.frameTop);
+  const clipBottom = Math.max(0, cellHeight - fitMetrics.frameTop - fitMetrics.clipHeight);
+
+  if (clipLeft < 0.5 && clipRight < 0.5 && clipTop < 0.5 && clipBottom < 0.5) {
+    cell.el.style.clipPath = '';
+    return;
+  }
+
+  cell.el.style.clipPath = `inset(${clipTop}px ${clipRight}px ${clipBottom}px ${clipLeft}px)`;
+}
+
+function syncLocalFitUi() {
+  const portraitToggle = document.getElementById('portrait-fit-toggle');
+  if (!portraitToggle) return;
+  portraitToggle.checked = portraitHeightFitEnabled;
+}
+
+function setPortraitHeightFitEnabled(checked) {
+  markUserInput();
+  portraitHeightFitEnabled = checked;
+  syncLocalFitUi();
+  rebuildCanvas();
 }
 
 function getLogoModePolicy() {
@@ -1765,6 +1910,8 @@ function rebuildCanvas() {
   requestAnimationFrame(() => {
     cells.forEach((cell, index) => {
       if (!cell.imgSrc) return;
+      cell.imgX = clampPan(cell.imgX, 'x', index);
+      cell.imgY = clampPan(cell.imgY, 'y', index);
       if (cell.isSvg) updateSvgImgTransform(index);
       else updateTransform(index);
     });
@@ -1804,6 +1951,7 @@ function buildRectCells(container, images) {
     cell.style.top = `calc(${zone.y}% + ${gapTop}px)`;
     cell.style.width = `calc(${zone.w}% - ${gapLeft + gapRight}px)`;
     cell.style.height = `calc(${zone.h}% - ${gapTop + gapBottom}px)`;
+    cell.style.background = '#1c1c1c';
 
     const overlay = document.createElement('div');
     overlay.className = 'cell-ov';
@@ -2014,6 +2162,8 @@ function clearCellImage(cellIndex) {
     if (cell.plusTxt) cell.plusTxt.style.display = '';
     if (cell.hitPoly) cell.hitPoly.style.cursor = 'pointer';
   } else {
+    cell.el.style.clipPath = '';
+    cell.el.style.background = '#1c1c1c';
     cell.el.classList.remove('has-img');
     cell.el.querySelector('.cell-img')?.remove();
     if (!cell.el.querySelector('.cell-ph')) appendPlaceholder(cell.el, cellIndex);
@@ -2048,47 +2198,25 @@ function updateTransform(cellIndex) {
     return;
   }
 
-  const naturalRatio = img.naturalWidth / img.naturalHeight;
-  const cellRatio = cellWidth / cellHeight;
-  let baseWidth;
-  let baseHeight;
-
-  if (naturalRatio >= cellRatio) {
-    baseHeight = cellHeight;
-    baseWidth = cellHeight * naturalRatio;
-  } else {
-    baseWidth = cellWidth;
-    baseHeight = cellWidth / naturalRatio;
-  }
-
-  const width = baseWidth * cell.imgScale;
-  const height = baseHeight * cell.imgScale;
+  const fitMetrics = getFitMetrics(img.naturalWidth, img.naturalHeight, cellWidth, cellHeight, {allowPortraitHeightFit:true});
+  const width = fitMetrics.baseWidth * cell.imgScale;
+  const height = fitMetrics.baseHeight * cell.imgScale;
+  updateRectCellBackground(cell, fitMetrics);
+  applyRectFrameMask(cell, cellWidth, cellHeight, fitMetrics);
   img.style.width = width + 'px';
   img.style.height = height + 'px';
-  img.style.left = (cellWidth - width) / 2 + cell.imgX + 'px';
-  img.style.top = (cellHeight - height) / 2 + cell.imgY + 'px';
+  img.style.left = fitMetrics.frameLeft + getRectImageOffsetX(cellIndex, fitMetrics, width) + cell.imgX + 'px';
+  img.style.top = fitMetrics.frameTop + (fitMetrics.clipHeight - height) / 2 + cell.imgY + 'px';
 }
 
 function updateSvgImgTransform(cellIndex) {
   const cell = cells[cellIndex];
   if (!cell?.imgEl || !cell.imgNatW || !cell.imgNatH) return;
 
-  const naturalRatio = cell.imgNatW / cell.imgNatH;
   const bbox = cell.zoneBbox || {w:VB, h:VB, cx:VB / 2, cy:VB / 2};
-  const bboxRatio = bbox.w / bbox.h;
-  let baseWidth;
-  let baseHeight;
-
-  if (naturalRatio >= bboxRatio) {
-    baseHeight = bbox.h;
-    baseWidth = bbox.h * naturalRatio;
-  } else {
-    baseWidth = bbox.w;
-    baseHeight = bbox.w / naturalRatio;
-  }
-
-  const width = baseWidth * cell.imgScale;
-  const height = baseHeight * cell.imgScale;
+  const fitMetrics = getFitMetrics(cell.imgNatW, cell.imgNatH, bbox.w, bbox.h);
+  const width = fitMetrics.baseWidth * cell.imgScale;
+  const height = fitMetrics.baseHeight * cell.imgScale;
   const container = document.getElementById('canvas-container');
   const pxToVB = container.offsetWidth > 0 ? VB / container.offsetWidth : 1;
   const offsetX = cell.imgX * pxToVB;
@@ -2109,29 +2237,18 @@ function clampPan(value, axis, cellIndex) {
   if (!cell) return value;
 
   if (cell.isSvg) {
-    const naturalRatio = cell.imgNatW && cell.imgNatH ? cell.imgNatW / cell.imgNatH : 1;
     const bbox = cell.zoneBbox || {w:VB, h:VB};
-    const bboxRatio = bbox.w / bbox.h;
-    let baseWidth;
-    let baseHeight;
-    if (naturalRatio >= bboxRatio) {
-      baseHeight = bbox.h;
-      baseWidth = bbox.h * naturalRatio;
-    } else {
-      baseWidth = bbox.w;
-      baseHeight = bbox.w / naturalRatio;
-    }
-
-    const width = baseWidth * cell.imgScale;
-    const height = baseHeight * cell.imgScale;
+    const fitMetrics = getFitMetrics(cell.imgNatW || 1, cell.imgNatH || 1, bbox.w, bbox.h);
+    const width = fitMetrics.baseWidth * cell.imgScale;
+    const height = fitMetrics.baseHeight * cell.imgScale;
     const container = document.getElementById('canvas-container');
     const vbToPx = container.offsetWidth > 0 ? container.offsetWidth / VB : 1;
 
     if (axis === 'x') {
-      const extra = Math.max(0, (width - bbox.w) / 2) * vbToPx;
+      const extra = Math.max(0, (width - fitMetrics.clipWidth) / 2) * vbToPx;
       return Math.max(-extra, Math.min(extra, value));
     }
-    const extra = Math.max(0, (height - bbox.h) / 2) * vbToPx;
+    const extra = Math.max(0, (height - fitMetrics.clipHeight) / 2) * vbToPx;
     return Math.max(-extra, Math.min(extra, value));
   }
 
@@ -2140,27 +2257,15 @@ function clampPan(value, axis, cellIndex) {
 
   const cellWidth = cell.el.offsetWidth;
   const cellHeight = cell.el.offsetHeight;
-  const naturalRatio = img.naturalWidth / img.naturalHeight;
-  const cellRatio = cellWidth / cellHeight;
-  let baseWidth;
-  let baseHeight;
-
-  if (naturalRatio >= cellRatio) {
-    baseHeight = cellHeight;
-    baseWidth = cellHeight * naturalRatio;
-  } else {
-    baseWidth = cellWidth;
-    baseHeight = cellWidth / naturalRatio;
-  }
-
-  const width = baseWidth * cell.imgScale;
-  const height = baseHeight * cell.imgScale;
+  const fitMetrics = getFitMetrics(img.naturalWidth, img.naturalHeight, cellWidth, cellHeight, {allowPortraitHeightFit:true});
+  const width = fitMetrics.baseWidth * cell.imgScale;
+  const height = fitMetrics.baseHeight * cell.imgScale;
 
   if (axis === 'x') {
-    const extra = Math.max(0, (width - cellWidth) / 2);
+    const extra = Math.max(0, (width - fitMetrics.clipWidth) / 2);
     return Math.max(-extra, Math.min(extra, value));
   }
-  const extra = Math.max(0, (height - cellHeight) / 2);
+  const extra = Math.max(0, (height - fitMetrics.clipHeight) / 2);
   return Math.max(-extra, Math.min(extra, value));
 }
 
@@ -2576,21 +2681,10 @@ async function exportImage() {
       ctx.closePath();
       ctx.clip();
 
-      const naturalRatio = cell.imgNatW && cell.imgNatH ? cell.imgNatW / cell.imgNatH : 1;
       const bbox = cell.zoneBbox || {w:VB, h:VB, cx:VB / 2, cy:VB / 2};
-      const bboxRatio = bbox.w / bbox.h;
-      let baseWidth;
-      let baseHeight;
-      if (naturalRatio >= bboxRatio) {
-        baseHeight = bbox.h;
-        baseWidth = bbox.h * naturalRatio;
-      } else {
-        baseWidth = bbox.w;
-        baseHeight = bbox.w / naturalRatio;
-      }
-
-      const drawWidth = baseWidth * cell.imgScale * (width / VB);
-      const drawHeight = baseHeight * cell.imgScale * (height / VB);
+      const fitMetrics = getFitMetrics(cell.imgNatW || 1, cell.imgNatH || 1, bbox.w, bbox.h);
+      const drawWidth = fitMetrics.baseWidth * cell.imgScale * (width / VB);
+      const drawHeight = fitMetrics.baseHeight * cell.imgScale * (height / VB);
       const centerX = bbox.cx * (width / VB);
       const centerY = bbox.cy * (height / VB);
       const dx = centerX - drawWidth / 2 + cell.imgX * scaleX;
@@ -2607,27 +2701,27 @@ async function exportImage() {
     const cellY = (rect.top - containerRect.top) * scaleY;
     const cellWidth = cell.el.offsetWidth * scaleX;
     const cellHeight = cell.el.offsetHeight * scaleY;
+    const fitMetrics = getFitMetrics(img.naturalWidth, img.naturalHeight, cell.el.offsetWidth, cell.el.offsetHeight, {allowPortraitHeightFit:true});
+    const clipX = cellX + fitMetrics.frameLeft * scaleX;
+    const clipY = cellY + fitMetrics.frameTop * scaleY;
+    const clipWidth = fitMetrics.clipWidth * scaleX;
+    const clipHeight = fitMetrics.clipHeight * scaleY;
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(cellX, cellY, cellWidth, cellHeight);
+    ctx.rect(clipX, clipY, clipWidth, clipHeight);
     ctx.clip();
 
-    const naturalRatio = img.naturalWidth / img.naturalHeight;
-    const cellRatio = cellWidth / cellHeight;
-    let baseWidth;
-    let baseHeight;
-    if (naturalRatio >= cellRatio) {
-      baseHeight = cellHeight;
-      baseWidth = cellHeight * naturalRatio;
-    } else {
-      baseWidth = cellWidth;
-      baseHeight = cellWidth / naturalRatio;
-    }
-
-    const drawWidth = baseWidth * cell.imgScale;
-    const drawHeight = baseHeight * cell.imgScale;
-    ctx.drawImage(img, cellX + (cellWidth - drawWidth) / 2 + cell.imgX * scaleX, cellY + (cellHeight - drawHeight) / 2 + cell.imgY * scaleY, drawWidth, drawHeight);
+    const drawWidth = fitMetrics.baseWidth * cell.imgScale * scaleX;
+    const drawHeight = fitMetrics.baseHeight * cell.imgScale * scaleY;
+    const drawOffsetX = getRectImageOffsetX(cell.id, fitMetrics, fitMetrics.baseWidth * cell.imgScale) * scaleX;
+    ctx.drawImage(
+      img,
+      clipX + drawOffsetX + cell.imgX * scaleX,
+      clipY + (clipHeight - drawHeight) / 2 + cell.imgY * scaleY,
+      drawWidth,
+      drawHeight
+    );
     ctx.restore();
   }
 
@@ -2662,6 +2756,7 @@ function resetAll() {
   logoOn = getLogoModePolicy().defaultOn;
   logoColor = 'light';
   logoPosition = 'bottom-right';
+  portraitHeightFitEnabled = false;
   layoutSectionOpen = true;
   activeDrag = null;
 
@@ -2680,6 +2775,7 @@ function resetAll() {
   renderLogoPositionButtons();
   renderImagesStrip();
   renderBgSwatches();
+  syncLocalFitUi();
   syncModeUi();
   syncLayoutToggle();
   applyRatioToCanvas();
@@ -2703,6 +2799,7 @@ function init() {
   renderImagesStrip();
   renderBgSwatches();
   renderLogoPositionButtons();
+  syncLocalFitUi();
   syncModeUi();
   syncLayoutToggle();
   selectedLayout = getDefaultLayout();
